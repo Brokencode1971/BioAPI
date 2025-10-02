@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Protein Lookup</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <style>
+    body { margin: 0; height: 100vh; display: flex; flex-direction: column; font-family: Arial, sans-serif; }
+    .top-search-bar { padding: 20px; background: #f4f7fa; position: relative; }
+    .container { flex: 1; display: flex; overflow: hidden; }
+    .sidebar { width: 220px; background: #fff; border-right: 1px solid #ccc; padding: 20px; overflow-y: auto; }
+    .menu-btn { display: flex; align-items: center; width: 100%; padding: 10px; margin-bottom: 8px; border: none; background: none; cursor: pointer; color: #7f8c8d; transition: background 0.3s, color 0.3s; font-size: 1em; }
+    .menu-btn i { margin-right: 10px; font-size: 1.2em; }
+    .menu-btn.active, .menu-btn:hover { background: #ecf0f1; color: #3498db; }
+    .content { flex: 1; padding: 20px; background: #fff; overflow-y: auto; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    input[type="text"] { width: calc(100% - 140px); padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+    button { padding: 10px 20px; margin-left: 10px; border: none; background: #3498db; color: white; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #2980b9; }
+    #suggestions { position: absolute; top: 60px; left: 20px; width: calc(100% - 40px); background: #fff; border: 2px solid #e67e22; max-height: 200px; overflow-y: auto; z-index: 1000; }
+    .suggestion { padding: 8px; cursor: pointer; }
+    .suggestion:hover { background: #f0f0f0; }
+    footer { text-align: center; padding: 10px; background: #f4f7fa; font-style: italic; color: #666; }
+  </style>
+</head>
+<body>
+  <div class="top-search-bar">
+    <form id="searchForm" style="display: flex; align-items: center;">
+      <input type="text" id="proteinId" name="query" placeholder="Enter UniProt ID or name" autocomplete="off" required>
+      <button type="submit">Search</button>
+    </form>
+    <div id="suggestions"></div>
+  </div>
+  <div class="container">
+    <div class="sidebar" id="menu"></div>
+    <div class="content" id="panels"></div>
+  </div>
+  <footer>Thanks for trying my site!</footer>
+
+  <script>
+    const isLocal = ['localhost','127.0.0.1'].includes(window.location.hostname);
+    const BACKEND = isLocal ? 'http://127.0.0.1:5000' : 'https://dev-playground-8c4p.onrender.com';
+
+    const categories = [
+      {id:'overview',  icon:'fa-book-open',          label:'Overview'},
+      {id:'function',  icon:'fa-cogs',               label:'Function'},
+      {id:'sequence',  icon:'fa-dna',                label:'Sequence'},
+      {id:'structure', icon:'fa-cubes',              label:'Structure'},
+      {id:'links',     icon:'fa-link',               label:'Links'},
+      {id:'activity',  icon:'fa-flask',              label:'Activity'},
+      {id:'localization',icon:'fa-map-marker-alt',   label:'Localization'},
+      {id:'modifications',icon:'fa-wrench',          label:'Modifications'},
+      {id:'domains_sites',icon:'fa-project-diagram', label:'Domain & Sites'},
+      {id:'keywords',  icon:'fa-tag',                label:'Keywords'},
+      {id:'references',icon:'fa-book',               label:'References'}
+    ];
+
+    function initMenu() {
+      const menu = document.getElementById('menu');
+      menu.innerHTML = categories.map(cat =>
+        '<button class="menu-btn" data-target="'+cat.id+'">'
+        +'<i class="fas '+cat.icon+'"></i>'
+        +cat.label+'</button>'
+      ).join('');
+      menu.querySelector('.menu-btn').classList.add('active');
+    }
+
+    function initPanels() {
+      const panels = document.getElementById('panels');
+      panels.innerHTML = categories.map(cat =>
+        '<div id="panel-'+cat.id+'" class="panel"></div>'
+      ).join('');
+    }
+
+    function showPanel(id) {
+      document.querySelectorAll('.menu-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.target===id));
+      document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id==='panel-'+id));
+    }
+
+    document.getElementById('menu').addEventListener('click', e => {
+      const btn = e.target.closest('.menu-btn');
+      if(btn) showPanel(btn.dataset.target);
+    });
+
+    document.getElementById('searchForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const query = document.getElementById('proteinId').value;
+      const res = await fetch(`${BACKEND}/search`, {
+        method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+        body:'query='+encodeURIComponent(query)
+      });
+      const data = await res.json();
+      if(data.error) {
+        document.getElementById('panels').innerHTML = '<p style="color:red;">'+data.error+'</p>';
+        return;
+      }
+
+      initMenu(); initPanels(); showPanel('overview');
+
+      document.getElementById('panel-overview').innerHTML =
+        '<p><b>Accession:</b> '+data.overview.accession+'</p>'+        
+        '<p><b>Name:</b> '+data.overview.recommended_name+'</p>'+      
+        '<p><b>Alt Names:</b> '+data.overview.alternative_names.join(', ')+'</p>'+      
+        '<p><b>Genes:</b> '+data.overview.gene_names.join(', ')+'</p>'+    
+        '<p><b>Organism:</b> '+data.overview.organism+'</p>';
+
+      document.getElementById('panel-function').innerHTML =
+        data.overview.function.map(txt=>' <p>'+txt+'</p>').join('');
+
+      document.getElementById('panel-sequence').innerHTML =
+        '<pre>'+data.sequence+'</pre>';
+
+      document.getElementById('panel-structure').innerHTML = data.structure.pdb_ids.length ?
+        '<iframe src="https://www.rcsb.org/3d-view/'+data.structure.pdb_ids[0]+'" width="100%" height="400"></iframe>' :
+        '<p>No PDB available</p>';
+
+      const linksHTML = data.links.map(l=>
+        '<li><a href="'+l.url+'" target="_blank">'+l.db+'</a></li>'
+      ).join('');
+      document.getElementById('panel-links').innerHTML = '<ul>'+linksHTML+'</ul>';
+
+      document.getElementById('panel-activity').innerHTML =
+        '<p><b>Catalytic:</b> '+data.activity.catalytic_activity.join(', ')+'</p>'+  
+        '<p><b>Regulation:</b> '+data.activity.regulation.join(', ')+'</p>';
+
+      document.getElementById('panel-localization').innerHTML =
+        '<p>'+data.localization.join(', ')+'</p>';
+
+      const modsHTML = data.modifications.map(m=>'<li>'+m+'</li>').join('');
+      document.getElementById('panel-modifications').innerHTML = '<ul>'+modsHTML+'</ul>';
+
+      const dsHTML = data.domains_sites.map(d=>'<li>'+d+'</li>').join('');
+      document.getElementById('panel-domains_sites').innerHTML = '<ul>'+dsHTML+'</ul>';
+
+      document.getElementById('panel-keywords').innerHTML =
+        '<p>'+data.keywords.join(', ')+'</p>';
+
+      const refHTML = data.references.map(r=>'<li>'+r+'</li>').join('');
+      document.getElementById('panel-references').innerHTML = '<ul>'+refHTML+'</ul>';
+    });
+
+    document.getElementById('proteinId').addEventListener('input', async function() {
+      const q=this.value; if(q.length<2) return document.getElementById('suggestions').innerHTML='';
+      const resp=await fetch(`${BACKEND}/autocomplete?q=`+encodeURIComponent(q));
+      const list=await resp.json();
+      const box=document.getElementById('suggestions'); box.innerHTML='';
+      list.forEach(item=>{
+        const d=document.createElement('div'); d.className='suggestion'; d.textContent=item.name+' ('+item.id+')';
+        d.onclick=()=>{document.getElementById('proteinId').value=item.id; box.innerHTML='';};
+        box.appendChild(d);
+      });
+    });
+  </script>
+</body>
+</html>
